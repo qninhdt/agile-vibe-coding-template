@@ -36,7 +36,7 @@
 
 - **Parameters:** <!-- optional -->
     <!-- description of parameters should be included with json comment -->
-  ```json
+  ```javascript
   {
     "field_name": "example_value" // short description if needed
   }
@@ -52,7 +52,7 @@
   - **Content-Type:** `<content_type>`
   - **Body:**
       <!-- description of body should be included with json comment -->
-    ```json
+    ```javascript
     {
       "field_name": "example_value" // short description if needed
     }
@@ -81,11 +81,22 @@
 
 #### eg: Authentication, Rate Limit, etc. <!-- optional -->
 
-## TODOs
+## Configuration <!-- optional -->
 
-<!-- list of features, methods, etc. that may appear in this task's source code when it is implemented but not covered in this task and could be implemented in future tasks, do not make it complicated so this section can be empty -->
+<!-- YAML format for configuration files of this task only -->
 
-- `TODO:` <description>
+```yaml
+<configuration_file_content>
+```
+
+## Environment Variables <!-- optional -->
+
+## Unit Tests <!-- optional -->
+
+<!-- ONLY CREATE UNIT TEST IF NEEDED, DO NOT OVERENGINEER -->
+<!-- list of testing scenarios that should be covered by unit tests -->
+
+- `<test_function_name>`: <test_description>
 
 ## References
 

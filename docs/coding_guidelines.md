@@ -1,89 +1,60 @@
 # Techstack and Coding Guidelines
 
-This document outlines the primary technologies, frameworks, libraries, tools, and coding practices used in the **Notepot project**.
+## Common Guidelines (for all services)
 
-## 1. Programming Languages
+- Keep It Simple, Stupid (KISS): Prefer the simplest solution that works.
+- You Ain't Gonna Need It (YAGNI): Don't over-engineer or add features that aren't currently required.
 
-- **Go:** Primary backend language for core services.
-- **Python:** Secondary backend language, specifically for LLM-related services.
-- **TypeScript:** Primary frontend language.
-- **Shell Scripting (Bash/sh):** For automation, deployment, and utility scripts.
+- Non-ascii characters are not allowed in source code (e.g. emoji, non-english characters, etc.)
+- Hardcoded values in the code are not allowed, instead use:
+  - YAML files: Non-sensitive values
+  - Environment variables: Sensitive values
+- Config must be consistent across all services.
 
-## 2. Backend Development
+## Go
 
-### 2.1. Go
+- Web Framework: Gin
+- ORM: Gorm
+- Logging: Zap
+- Configuration Management: Viper
+- Redis Client: Go-redis
+- Testing: Go-test
 
-- **Web Frameworks:**
-  - **Gin:** For building complex APIs requiring rich features.
-- **ORM:** **Gorm**
-- **Logging:** **Zap**
-- **Configuration Management:** **Viper**
-- **Redis Client:** **Go-redis**
+## Python
 
-### 2.2. Python (LLM Services)
+- Web Framework: Flask
+- WSGI: Gunicorn
+- ORM: SQLAlchemy
+- Redis Client: redis-py
+- Database Migration: Alembic
+- Testing: PyTest
+- Validation: Pydantic
+- Configuration Management: OmegaConf
+- Note: Do not use marshmallow (overlap with Pydantic)
 
-- **Web Framework:** **Flask**
-- **ORM:** **SQLAlchemy**
-- **Redis Client:** **redis-py**
+- Use N-tier architecture for Flask (route -> service -> repository -> model)
+- Global variables are not allowed.
+- Use dependency injection instead of global variables (inject in constructor)
+- All variables must be typed, using `Any` is not recommended but allowed.
+- Merge environment variables to config by directly setting the fields.
 
-### 2.3. API
+## API Guidelines
 
-- For HTTP API, every routes should be in the format of `/api/v1/...` unless otherwise specified like `/.well-known/jwks.json` (JWKS)
+- For HTTP API, every routes must be in the format of `/api/v1/...` unless otherwise specified like `/.well-known/jwks.json` (JWKS) or `/health` (health check)
+- Success response must be in the format: `{ data: <data> }`
+- Error response must be in the format: `{ error: { code: <error_name>, message: <error_message>, details (optional): [<detail_1>, <detail_2>, ...] } }`
+- Error code and error message should be implemented with enum or constants, don't use string literals.
 
-## 3. Frontend Development
+## Comment Guidelines
 
-- **Core Framework:** **Next.js** (utilizing **React** for UI components)
-- **CSS Framework:** **Tailwind CSS**
-- **UI Component Library:** **Shadcn UI**
+- Explain Why, Not What: Clarify intent for complex or non-obvious code
+- Document Public APIs: Briefly describe purpose, params, and returns
+- Keep Current: Update or remove comments when code changes
+- Write Self-Documenting Code: Prefer clear code over excessive comments
+- Use `TODO` to mark the code that needs to be improved or refactored
 
-## 4. Data Storage
+## Source Code Structure
 
-- **Relational Database:** **CockroachDB**
-- **NoSQL Database:** **ScyllaDB**
-- **Key-Value Store/Cache:** **Redis**
-
-## 5. Infrastructure & DevOps
-
-- **Cloud Provider:** **AWS (Amazon Web Services)**
-- **Containerization:** **Docker**
-- **Orchestration:**
-  - **Kubernetes (K8s):** For production environments.
-  - **Docker Swarm:** For development and testing environments.
-- **API Gateway:** **Kong**
-- **CI/CD:** **GitHub Actions**
-
-## 6. Development Tools & Practices
-
-### 6.1. Version Control
-
-- **Git** (hosted on GitHub)
-
-### 6.2. Recommended IDEs
-
-- **Visual Studio Code (VS Code)**
-- **Cursor**
-
-### 6.3. Code Formatting
-
-- **Go:** `gofmt` (standard Go formatter)
-- **Python:** **Black**
-- **TypeScript:** **Prettier**
-
-### 6.4. Linting
-
-- **Go:** `golint` (or preferred linter like `golangci-lint`)
-- **Python:** **Flake8**
-- **TypeScript:** **ESLint**
-
-### 6.5. Testing
-
-- **Unit Testing:**
-  - **Go:** Standard `testing` package (`go test`)
-  - **Python:** **PyTest**
-  - **TypeScript:** **Jest**
-- **End-to-End (E2E) Testing:** **Playwright**
-- **Testing Principle:** Each test case **must** use unique mock data or setup/teardown routines to ensure test isolation and prevent dependencies on the state left by previous tests. Avoid data duplication across tests where it can lead to ambiguity or shared state issues.
-
-## 7. Coding Guidelines
-
-- No hardcoded values in the code, use environment variables or configuration files.
+- `src/auth-service/`: Auth service
+- `src/user-service/`: User service
+- `src/chat-service/`: Chat service

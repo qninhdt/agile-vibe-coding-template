@@ -1,0 +1,62 @@
+services:
+  auth-service:
+    build:
+      context: ./src/auth-service
+      dockerfile: Dockerfile
+    ports:
+      - 8080:8080
+    environment:
+      - DEBUG=True
+      - DATABASE_URL=postgresql://test_user:test_password@auth-db:5432/notepot_auth?sslmode=disable
+      - REDIS_URL=redis://auth-redis:6379
+    # sync migrations folder
+    volumes:
+      - ./src/auth-service/app:/app/app
+      - ./src/auth-service/tests:/app/tests
+      - ./src/auth-service/migrations:/app/migrations
+
+    depends_on:
+      auth-db:
+        condition: service_healthy
+      auth-redis:
+        condition: service_healthy
+    networks:
+      - notepot-network
+
+  auth-db:
+    image: postgres:latest
+    ports:
+      - 5432:5432
+    environment:
+      - POSTGRES_DB=notepot_auth
+      - POSTGRES_USER=test_user
+      - POSTGRES_PASSWORD=test_password
+    volumes:
+      - auth-db-data:/var/lib/postgresql/data
+    networks:
+      - notepot-network
+
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "test_user", "-d", "notepot_auth"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  auth-redis:
+    image: redis:latest
+    ports:
+      - 6379:6379
+    networks:
+      - notepot-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+networks:
+  notepot-network:
+    driver: bridge
+
+volumes:
+  auth-db-data:

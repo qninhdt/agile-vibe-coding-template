@@ -34,7 +34,6 @@ This document lists the user stories. Each story describes a specific piece of f
   - AC3: System verifies email/username and password.
   - AC4: Upon successful login, the user is redirected to their dashboard.
   - AC5: An error message is shown for any validation failure.
-  - AC6: Ban the IP address after X failed attempts.
 - **Related Epic(s):** [EPIC-001: User Account Management](epics.md#epic-001-user-account-management)
 
 ---
