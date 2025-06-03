@@ -5,51 +5,53 @@ import logging
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 
 import bcrypt
 import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-
-from app.config import config
+from omegaconf import DictConfig
 
 
 logger = logging.getLogger(__name__)
 
 
-class JWTManager:
+class JWTService:
     """JWT token management with RSA keys."""
 
-    def __init__(self):
-        self.private_key, self.public_key = self._get_or_generate_keys()
-        self.key_id = self._get_key_id()
-        self.algorithm = config.get("jwt.algorithm", "RS256")
-        self.issuer = config.get("jwt.issuer", "notepot_auth-service")
-        self.audience = config.get("jwt.audience", "notepot-services")
-        self.access_token_ttl = config.get("jwt.access_token_ttl_minutes", 15)
-        self.refresh_token_ttl = config.get("jwt.refresh_token_ttl_days", 30)
+    def __init__(
+        self,
+        config: DictConfig,
+    ):
+        self.private_key = config.private_key
+        self.public_key = config.public_key
+        self.algorithm = config.algorithm
+        self.issuer = config.issuer
+        self.audience = config.audience
+        self.access_token_ttl = (
+            config.access_token_ttl_minutes * 60
+        )  # Convert to seconds
+        self.refresh_token_ttl = (
+            config.refresh_token_ttl_days * 24 * 60 * 60
+        )  # Convert to seconds
+        self.key_size = config.key_size
 
-    def _get_or_generate_keys(self) -> Tuple[str, str]:
-        """Get keys from environment or generate new ones."""
-        private_key = config.jwt_private_key
-        public_key = config.jwt_public_key
+        self.key_id = f"notepot-auth-service-key-{int(time.time())}"
 
-        if not private_key or not public_key:
-            logger.warning(
+        if not self.private_key or not self.public_key:
+            logger.info(
                 "JWT keys not found in environment variables. Generating new keys."
             )
-            return self._generate_rsa_keys()
-
-        return private_key, public_key
+            self._generate_rsa_keys()
 
     def _generate_rsa_keys(self) -> Tuple[str, str]:
         """Generate RSA key pair."""
-        key_size = config.get("jwt.key_size", 2048)
 
         # Generate private key
-        private_key = rsa.generate_private_key(public_exponent=65537, key_size=key_size)
-
+        private_key = rsa.generate_private_key(
+            public_exponent=65537, key_size=self.key_size
+        )
         # Serialize private key
         private_pem = private_key.private_bytes(
             encoding=serialization.Encoding.PEM,
@@ -64,15 +66,8 @@ class JWTManager:
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
 
-        return private_pem.decode("utf-8"), public_pem.decode("utf-8")
-
-    def _get_key_id(self) -> str:
-        """Get or generate key ID."""
-        key_id = config.jwt_key_id
-        if not key_id:
-            timestamp = int(time.time())
-            key_id = f"auth-service-key-{timestamp}"
-        return key_id
+        self.private_key = private_pem.decode("utf-8")
+        self.public_key = public_pem.decode("utf-8")
 
     def generate_access_token(self, user_id: str, username: str, email: str) -> str:
         """Generate JWT access token."""
@@ -81,7 +76,7 @@ class JWTManager:
             "sub": user_id,
             "iss": self.issuer,
             "aud": self.audience,
-            "exp": now + timedelta(minutes=self.access_token_ttl),
+            "exp": now + timedelta(seconds=self.access_token_ttl),
             "iat": now,
             "jti": str(uuid.uuid4()),
             "type": "access",
@@ -103,7 +98,7 @@ class JWTManager:
             "sub": user_id,
             "iss": self.issuer,
             "aud": self.issuer,  # refresh tokens are for auth service only
-            "exp": now + timedelta(days=self.refresh_token_ttl),
+            "exp": now + timedelta(seconds=self.refresh_token_ttl),
             "iat": now,
             "jti": str(uuid.uuid4()),
             "type": "refresh",
@@ -118,31 +113,23 @@ class JWTManager:
 
     def validate_token(self, token: str, token_type: str = "access") -> Dict[str, Any]:
         """Validate JWT token and return payload."""
-        try:
-            # Decode without verification first to get headers
-            unverified = jwt.decode(token, options={"verify_signature": False})
+        # Decode without verification first to get headers
+        unverified = jwt.decode(token, options={"verify_signature": False})
 
-            # Verify the token type
-            if unverified.get("type") != token_type:
-                raise jwt.InvalidTokenError(
-                    f"Invalid token type: expected {token_type}"
-                )
+        # Verify the token type
+        if unverified.get("type") != token_type:
+            raise jwt.InvalidTokenError(f"Token type is invalid")
 
-            # Verify the token
-            payload = jwt.decode(
-                token,
-                self.public_key,
-                algorithms=[self.algorithm],
-                issuer=self.issuer,
-                audience=self.issuer if token_type == "refresh" else self.audience,
-            )
+        # Verify the token
+        payload = jwt.decode(
+            token,
+            self.public_key,
+            algorithms=[self.algorithm],
+            issuer=self.issuer,
+            audience=self.issuer if token_type == "refresh" else self.audience,
+        )
 
-            return payload
-
-        except jwt.ExpiredSignatureError:
-            raise jwt.InvalidTokenError("Token has expired")
-        except jwt.InvalidTokenError as e:
-            raise jwt.InvalidTokenError(f"Invalid token: {str(e)}")
+        return payload
 
     def get_jwks(self) -> Dict[str, Any]:
         """Get JSON Web Key Set for public key distribution."""
@@ -183,11 +170,12 @@ class JWTManager:
         return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+# TODO: refactor this code
 class PasswordManager:
     """Password hashing and verification utilities."""
 
-    def __init__(self):
-        self.rounds = config.get("account.password.bcrypt_rounds", 12)
+    def __init__(self, rounds: int):
+        self.rounds = rounds
 
     def hash_password(self, password: str) -> str:
         """Hash password using bcrypt."""

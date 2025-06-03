@@ -1,7 +1,7 @@
 jwt:
   algorithm: "RS256"
-  issuer: "notepot_auth-service"
-  audience: "notepot-services"
+  issuer: "notepot-auth-service"
+  audience: "notepot-api-gateway"
   access_token_ttl_minutes: 15
   refresh_token_ttl_days: 30
   key_rotation_days: 90
@@ -37,5 +37,3 @@ login:
     enable_audit_logging: True
   session:
     max_sessions_per_user: 10
-redis:
-  url: "redis://localhost:6379/0"

@@ -1,6 +1,13 @@
 """Service layer for business logic."""
 
 from .auth_service import AuthService
-from .rate_limiter import RateLimiter
+from .cache_service import CacheService
+from .jwt_service import JWTService, PasswordManager
 
-__all__ = ["AuthService", "RateLimiter"]
+__all__ = [
+    "AuthService",
+    "RateLimiter",
+    "CacheService",
+    "JWTService",
+    "PasswordManager",
+]

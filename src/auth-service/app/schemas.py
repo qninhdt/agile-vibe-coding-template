@@ -25,7 +25,7 @@ class RegisterRequest(BaseModel):
             )
 
         # Check reserved words
-        reserved_words = config.get("account.username.reserved_words", [])
+        reserved_words = config.account.username.reserved_words
         if v.lower() in [word.lower() for word in reserved_words]:
             raise ValueError("Username is reserved and cannot be used")
 

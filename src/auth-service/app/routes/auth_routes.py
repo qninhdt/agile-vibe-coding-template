@@ -11,7 +11,6 @@ from app.schemas import (
     RefreshTokenRequest,
     LogoutRequest,
 )
-from werkzeug.exceptions import BadRequest
 from app.utils.errors import AuthError
 
 
@@ -84,19 +83,6 @@ def create_auth_bp(auth_service: AuthService):
         except AuthError as e:
             return handle_auth_error(e)
 
-        except BadRequest as e:
-            return (
-                jsonify(
-                    {
-                        "error": {
-                            "code": "INVALID_REQUEST",
-                            "message": "Invalid request format",
-                        }
-                    }
-                ),
-                400,
-            )
-
         except Exception as e:
             logger.error(f"Unexpected error in register: {str(e)}")
             return (
@@ -142,19 +128,6 @@ def create_auth_bp(auth_service: AuthService):
 
         except AuthError as e:
             return handle_auth_error(e)
-
-        except BadRequest as e:
-            return (
-                jsonify(
-                    {
-                        "error": {
-                            "code": "INVALID_REQUEST",
-                            "message": "Invalid request format",
-                        }
-                    }
-                ),
-                400,
-            )
 
         except Exception as e:
             logger.error(f"Unexpected error in login: {str(e)}")
@@ -240,19 +213,6 @@ def create_auth_bp(auth_service: AuthService):
 
         except AuthError as e:
             return handle_auth_error(e)
-
-        except BadRequest as e:
-            return (
-                jsonify(
-                    {
-                        "error": {
-                            "code": "INVALID_REQUEST",
-                            "message": "Invalid request format",
-                        }
-                    }
-                ),
-                400,
-            )
 
         except Exception as e:
             logger.error(f"Unexpected error in logout: {str(e)}")

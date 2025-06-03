@@ -1,217 +1,137 @@
-"""Test configuration and fixtures."""
-
 import pytest
-import tempfile
-import os
-from unittest.mock import Mock, MagicMock
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from alembic.config import Config
-from alembic import command
+import uuid
+from typing import Dict
 
-from app.services.auth_service import AuthService
-from app.repositories.user_repository import UserRepository
-from app.repositories.refresh_token_repository import RefreshTokenRepository
-from app.utils.auth import JWTManager, PasswordManager
+from omegaconf import DictConfig
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+
+from app.services.jwt_service import JWTService, PasswordManager
 from app.services.rate_limiter import RateLimiter
-from app.models.user import User
-from app.models import Base
-from app.config import Config as AppConfig
 
 
-@pytest.fixture
-def mock_config():
-    """Mock configuration for testing."""
-    config = Mock(spec=AppConfig)
-    config.get.side_effect = lambda key, default=None: {
-        "jwt.algorithm": "RS256",
-        "jwt.issuer": "test-issuer",
-        "jwt.audience": "test-audience",
-        "jwt.access_token_ttl_minutes": 15,
-        "jwt.refresh_token_ttl_days": 30,
-        "jwt.key_size": 2048,
-        "account.password.bcrypt_rounds": 4,  # Lower for testing speed
-        "account.username.reserved_words": ["admin", "root"],
-        "login.session.max_sessions_per_user": 10,
-    }.get(key, default)
-
-    config.jwt_private_key = None
-    config.jwt_public_key = None
-    config.jwt_key_id = "test-key-id"
-
-    return config
-
-
-@pytest.fixture
-def test_database_url():
-    """Create a temporary SQLite database file for testing."""
-    # Create a temporary database file
-    db_fd, db_path = tempfile.mkstemp(suffix=".db")
-    os.close(db_fd)  # Close the file descriptor, we only need the path
-
-    database_url = f"sqlite:///{db_path}"
-
-    yield database_url
-
-    # Cleanup: remove the temporary database file
-    try:
-        os.unlink(db_path)
-    except OSError:
-        pass
-
-
-@pytest.fixture
-def alembic_config():
-    """Create Alembic configuration for testing."""
-    # Get the directory of this file to locate alembic.ini
-    current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    alembic_cfg = Config(os.path.join(current_dir, "alembic.ini"))
-
-    # Override the script location to point to our migrations directory
-    alembic_cfg.set_main_option(
-        "script_location", os.path.join(current_dir, "migrations")
+@pytest.fixture(scope="session")
+def test_rsa_keys():
+    """Generates a new RSA key pair for testing."""
+    private_key_obj = rsa.generate_private_key(
+        public_exponent=65537, key_size=2048  # Use a common key size for tests
     )
+    private_pem = private_key_obj.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("utf-8")
 
-    return alembic_cfg
-
-
-@pytest.fixture
-def in_memory_db(test_database_url, alembic_config):
-    """Create database with Alembic migrations for testing."""
-    # Override the database URL in alembic config for testing
-    alembic_config.set_main_option("sqlalchemy.url", test_database_url)
-
-    # Create the database engine
-    engine = create_engine(test_database_url)
-
-    # Run Alembic migrations to set up the schema
-    try:
-        command.upgrade(alembic_config, "head")
-    except Exception as e:
-        # If migrations fail, fall back to creating tables directly
-        print(
-            f"Warning: Alembic migration failed ({e}), falling back to metadata.create_all()"
-        )
-        Base.metadata.create_all(engine)
-
-    return engine
+    public_key_obj = private_key_obj.public_key()
+    public_pem = public_key_obj.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("utf-8")
+    return private_pem, public_pem
 
 
 @pytest.fixture
-def user_repo(in_memory_db):
-    """Create user repository for testing."""
-    return UserRepository(in_memory_db)
-
-
-@pytest.fixture
-def refresh_token_repo(in_memory_db):
-    """Create refresh token repository for testing."""
-    return RefreshTokenRepository(in_memory_db)
-
-
-@pytest.fixture
-def mock_rate_limiter():
-    """Mock rate limiter for testing."""
-    rate_limiter = Mock(spec=RateLimiter)
-    rate_limiter.check_rate_limit.return_value = None
-    rate_limiter.record_attempt.return_value = None
-    rate_limiter.clear_user_rate_limits.return_value = None
-    return rate_limiter
-
-
-@pytest.fixture
-def jwt_manager(mock_config, monkeypatch):
-    """Create JWT manager for testing."""
-    # Mock config module
-    monkeypatch.setattr("app.utils.auth.config", mock_config)
-    return JWTManager()
-
-
-@pytest.fixture
-def password_manager(mock_config, monkeypatch):
-    """Create password manager for testing."""
-    # Mock config module
-    monkeypatch.setattr("app.utils.auth.config", mock_config)
-    return PasswordManager()
-
-
-@pytest.fixture
-def auth_service(
-    user_repo, refresh_token_repo, mock_rate_limiter, jwt_manager, password_manager
-):
-    """Create auth service for testing."""
-    return AuthService(
-        user_repo=user_repo,
-        refresh_token_repo=refresh_token_repo,
-        rate_limiter=mock_rate_limiter,
-        jwt_manager=jwt_manager,
-        password_manager=password_manager,
+def jwt_config(test_rsa_keys) -> DictConfig:
+    """Provides a base DictConfig for JWTService."""
+    private_key, public_key = test_rsa_keys
+    return DictConfig(
+        {
+            "private_key": private_key,
+            "public_key": public_key,
+            "algorithm": "RS256",
+            "issuer": "test_issuer",
+            "audience": "test_audience",
+            "access_token_ttl_minutes": 15,
+            "refresh_token_ttl_days": 7,
+            "key_size": 2048,
+        }
     )
 
 
 @pytest.fixture
-def sample_user_data():
-    """Sample user data for testing."""
+def jwt_config_no_keys() -> DictConfig:
+    """Provides a DictConfig without pre-set keys to test generation."""
+    return DictConfig(
+        {
+            "private_key": None,
+            "public_key": None,
+            "algorithm": "RS256",
+            "issuer": "test_gen_issuer",
+            "audience": "test_gen_audience",
+            "access_token_ttl_minutes": 1,  # shorter for testing
+            "refresh_token_ttl_days": 1,  # shorter for testing
+            "key_size": 2048,
+        }
+    )
+
+
+@pytest.fixture
+def jwt_service(jwt_config: DictConfig) -> JWTService:
+    """Fixture for JWTService instance with pre-defined keys."""
+    return JWTService(config=jwt_config)
+
+
+@pytest.fixture
+def jwt_service_generated_keys(jwt_config_no_keys: DictConfig) -> JWTService:
+    """Fixture for JWTService instance that generates its own keys."""
+    return JWTService(config=jwt_config_no_keys)
+
+
+@pytest.fixture
+def password_manager() -> PasswordManager:
+    """Fixture for PasswordManager instance."""
+    return PasswordManager(rounds=4)  # Use low rounds for faster tests
+
+
+@pytest.fixture
+def user_details() -> Dict[str, str]:
     return {
-        "email": "testcc@gmail.com",
-        "username": "testusercc",
-        "password": "TestPass123!",
-        "confirm_password": "TestPass123!",
+        "user_id": str(uuid.uuid4()),
+        "username": "testuser",
+        "email": "test@example.com",
     }
 
 
 @pytest.fixture
-def created_user(user_repo, password_manager):
-    """Create a user in the database for testing."""
-    password_hash = password_manager.hash_password("TestPass123!")
-    user = user_repo.create_user(
-        email="testcc@example.com",
-        username="testusercc",
-        password_hash=password_hash,
-    )
-    return user
+def mock_cache_service():
+    return MagicMock()
 
 
 @pytest.fixture
-def flask_app(auth_service, monkeypatch):
-    """Create Flask app for testing."""
-    from app.main import create_app
-    from app.routes import create_auth_bp, create_jwks_bp, create_health_bp
-    from flask import Flask
-
-    app = Flask(__name__)
-    app.config["TESTING"] = True
-
-    # Mock the config and dependencies
-    mock_db_engine = Mock()
-    monkeypatch.setattr("app.main.create_engine", lambda url: mock_db_engine)
-    monkeypatch.setattr(
-        "app.main.UserRepository", lambda engine: auth_service.user_repo
+def rate_limit_config_enabled():
+    return DictConfig(
+        {
+            "enabled": True,
+            "per_ip_requests": 10,
+            "per_ip_window_minutes": 1,
+            "per_identifier_attempts": 5,
+            "per_identifier_window_minutes": 5,
+            "per_account_attempts": 3,
+            "per_account_window_minutes": 15,
+        }
     )
-    monkeypatch.setattr(
-        "app.main.RefreshTokenRepository",
-        lambda engine: auth_service.refresh_token_repo,
-    )
-    monkeypatch.setattr("app.main.RateLimiter", lambda: auth_service.rate_limiter)
-    monkeypatch.setattr("app.main.JWTManager", lambda: auth_service.jwt_manager)
-    monkeypatch.setattr(
-        "app.main.PasswordManager", lambda: auth_service.password_manager
-    )
-    monkeypatch.setattr("app.main.AuthService", lambda *args: auth_service)
-
-    # Register blueprints
-    auth_bp = create_auth_bp(auth_service)
-    jwks_bp = create_jwks_bp(auth_service)
-    health_bp = create_health_bp()
-
-    app.register_blueprint(auth_bp)
-    app.register_blueprint(jwks_bp)
-    app.register_blueprint(health_bp)
-
-    return app
 
 
 @pytest.fixture
-def client(flask_app):
-    """Create test client."""
-    return flask_app.test_client()
+def rate_limit_config_disabled():
+    return DictConfig(
+        {
+            "enabled": False,
+            "per_ip_requests": 10,
+            "per_ip_window_minutes": 1,
+            "per_identifier_attempts": 5,
+            "per_identifier_window_minutes": 5,
+            "per_account_attempts": 3,
+            "per_account_window_minutes": 15,
+        }
+    )
+
+
+@pytest.fixture
+def rate_limiter_enabled(rate_limit_config_enabled, mock_cache_service):
+    return RateLimiter(rate_limit_config_enabled, mock_cache_service)
+
+
+@pytest.fixture
+def rate_limiter_disabled(rate_limit_config_disabled, mock_cache_service):
+    return RateLimiter(rate_limit_config_disabled, mock_cache_service)

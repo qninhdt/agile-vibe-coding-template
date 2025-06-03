@@ -1,20 +1,22 @@
 """Main Flask application factory."""
 
 import logging
-import os
 from flask import Flask
-from flask_cors import CORS
 
-from app.config import config
 from app.routes import (
     create_auth_bp,
     create_jwks_bp,
     create_health_bp,
 )
-from app.services import AuthService, RateLimiter
+from app.services import (
+    AuthService,
+    CacheService,
+    JWTService,
+    PasswordManager,
+)
 from app.repositories import UserRepository, RefreshTokenRepository
 from sqlalchemy import create_engine
-from app.utils.auth import JWTManager, PasswordManager
+from app.config import config
 
 
 def create_app() -> Flask:
@@ -27,12 +29,9 @@ def create_app() -> Flask:
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
 
-    # Enable CORS
-    CORS(app)
-
     # Initialize database
     try:
-        db_engine = create_engine(config.database_url)
+        db_engine = create_engine(config.database.url)
 
         logging.info("Database initialized successfully")
     except Exception as e:
@@ -42,13 +41,13 @@ def create_app() -> Flask:
     # Initialize repositories
     user_repo = UserRepository(db_engine)
     refresh_token_repo = RefreshTokenRepository(db_engine)
-    rate_limiter = RateLimiter()
-    jwt_manager = JWTManager()
-    password_manager = PasswordManager()
+    cache_service = CacheService(config.redis)
+    jwt_service = JWTService(config.jwt)
+    password_manager = PasswordManager(config.account.password.bcrypt_rounds)
 
     # Initialize services
     auth_service = AuthService(
-        user_repo, refresh_token_repo, rate_limiter, jwt_manager, password_manager
+        user_repo, refresh_token_repo, jwt_service, password_manager
     )
 
     # Initialize routes

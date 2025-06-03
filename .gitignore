@@ -1,5 +1,5 @@
-
-
+.coverage
+.pytest_cache
 # Added by Claude Task Master
 # Logs
 logs

@@ -19,8 +19,7 @@ from app.utils.errors import (
 )
 from app.schemas import RegisterRequest, LoginRequest
 from app.config import config
-from app.services.rate_limiter import RateLimiter
-from app.utils.auth import JWTManager, PasswordManager
+from app.services.jwt_service import JWTService, PasswordManager
 
 
 logger = logging.getLogger(__name__)
@@ -33,14 +32,12 @@ class AuthService:
         self,
         user_repo: UserRepository,
         refresh_token_repo: RefreshTokenRepository,
-        rate_limiter: RateLimiter,
-        jwt_manager: JWTManager,
+        jwt_service: JWTService,
         password_manager: PasswordManager,
     ):
         self.user_repo = user_repo
         self.refresh_token_repo = refresh_token_repo
-        self.rate_limiter = rate_limiter
-        self.jwt_manager = jwt_manager
+        self.jwt_service = jwt_service
         self.password_manager = password_manager
 
     def register_user(self, request: RegisterRequest) -> Dict[str, Any]:
@@ -79,9 +76,6 @@ class AuthService:
     ) -> Dict[str, Any]:
         """Authenticate user and return tokens."""
         try:
-            # Check rate limits first
-            self.rate_limiter.check_rate_limit(ip_address, request.identifier)
-
             # Find user by identifier
             user = self.user_repo.get_user_by_identifier(request.identifier)
 
@@ -91,37 +85,25 @@ class AuthService:
                 # TODO: Try to understand this line and uncomment it
                 # password_manager.dummy_verify()
 
-                # Record failed attempt
-                self.rate_limiter.record_attempt(ip_address, request.identifier)
                 raise InvalidCredentialsError()
 
             # Check if account is active
             if not user.is_active:
-                self.rate_limiter.record_attempt(
-                    ip_address, request.identifier, str(user.id)
-                )
                 raise AccountInactiveError()
 
             # Verify password
             if not self.password_manager.verify_password(
                 request.password, user.password_hash
             ):
-                # Record failed attempt
-                self.rate_limiter.record_attempt(
-                    ip_address, request.identifier, str(user.id)
-                )
                 raise InvalidCredentialsError()
-
-            # Clear rate limits on successful login
-            self.rate_limiter.clear_user_rate_limits(str(user.id))
 
             # Generate tokens
             tokens = self.create_tokens(user)
 
             # Store refresh token hash
-            token_hash = self.jwt_manager.hash_token(tokens["refresh_token"])
+            token_hash = self.jwt_service.hash_token(tokens["refresh_token"])
             expires_at = datetime.now(timezone.utc) + timedelta(
-                days=self.jwt_manager.refresh_token_ttl
+                days=self.jwt_service.refresh_token_ttl
             )
 
             self.refresh_token_repo.create_refresh_token(
@@ -147,34 +129,31 @@ class AuthService:
             }
 
         except Exception as e:
-            if not isinstance(e, (InvalidCredentialsError, AccountInactiveError)):
-                # Record attempt for unexpected errors too
-                self.rate_limiter.record_attempt(ip_address, request.identifier)
             raise
 
     def create_tokens(self, user: User) -> Dict[str, Any]:
         """Create access and refresh tokens."""
-        access_token = self.jwt_manager.generate_access_token(
+        access_token = self.jwt_service.generate_access_token(
             str(user.id), user.username, user.email
         )
-        refresh_token = self.jwt_manager.generate_refresh_token(str(user.id))
+        refresh_token = self.jwt_service.generate_refresh_token(str(user.id))
 
         return {
             "access_token": access_token,
             "refresh_token": refresh_token,
             "token_type": "Bearer",
-            "expires_in": self.jwt_manager.access_token_ttl * 60,
+            "expires_in": self.jwt_service.access_token_ttl * 60,
         }
 
     def refresh_tokens(self, refresh_token: str) -> Dict[str, Any]:
         """Refresh access and refresh tokens."""
         try:
             # Validate refresh token
-            payload = self.jwt_manager.validate_token(refresh_token, "refresh")
+            payload = self.jwt_service.validate_token(refresh_token, "refresh")
             user_id = payload["sub"]
 
             # Check if token exists in database and is valid
-            token_hash = self.jwt_manager.hash_token(refresh_token)
+            token_hash = self.jwt_service.hash_token(refresh_token)
             stored_token = self.refresh_token_repo.get_refresh_token_by_hash(token_hash)
 
             if not stored_token or not stored_token.is_valid():
@@ -189,15 +168,15 @@ class AuthService:
             self.refresh_token_repo.revoke_refresh_token(token_hash)
 
             # Generate new tokens
-            new_access_token = self.jwt_manager.generate_access_token(
+            new_access_token = self.jwt_service.generate_access_token(
                 str(user.id), user.username, user.email
             )
-            new_refresh_token = self.jwt_manager.generate_refresh_token(str(user.id))
+            new_refresh_token = self.jwt_service.generate_refresh_token(str(user.id))
 
             # Store new refresh token
-            new_token_hash = self.jwt_manager.hash_token(new_refresh_token)
+            new_token_hash = self.jwt_service.hash_token(new_refresh_token)
             expires_at = datetime.now(timezone.utc) + timedelta(
-                days=self.jwt_manager.refresh_token_ttl
+                days=self.jwt_service.refresh_token_ttl
             )
 
             self.refresh_token_repo.create_refresh_token(
@@ -210,7 +189,7 @@ class AuthService:
                 "access_token": new_access_token,
                 "refresh_token": new_refresh_token,
                 "token_type": "Bearer",
-                "expires_in": self.jwt_manager.access_token_ttl * 60,
+                "expires_in": self.jwt_service.access_token_ttl * 60,
             }
 
         except jwt.InvalidTokenError:
@@ -220,11 +199,11 @@ class AuthService:
         """Logout user by revoking refresh token."""
         try:
             # Validate refresh token format (but don't care if expired)
-            payload = self.jwt_manager.validate_token(refresh_token, "refresh")
+            payload = self.jwt_service.validate_token(refresh_token, "refresh")
             user_id = payload["sub"]
 
             # Revoke the token
-            token_hash = self.jwt_manager.hash_token(refresh_token)
+            token_hash = self.jwt_service.hash_token(refresh_token)
             revoked = self.refresh_token_repo.revoke_refresh_token(token_hash)
 
             if revoked:
@@ -234,17 +213,17 @@ class AuthService:
 
         except jwt.InvalidTokenError:
             # Still try to revoke in case token is malformed but exists in DB
-            token_hash = self.jwt_manager.hash_token(refresh_token)
+            token_hash = self.jwt_service.hash_token(refresh_token)
             self.refresh_token_repo.revoke_refresh_token(token_hash)
 
     def get_jwks(self) -> Dict[str, Any]:
         """Get JSON Web Key Set for public key distribution."""
-        return self.jwt_manager.get_jwks()
+        return self.jwt_service.get_jwks()
 
     def validate_access_token(self, token: str) -> Dict[str, Any]:
         """Validate access token and return user info."""
         try:
-            payload = self.jwt_manager.validate_token(token, "access")
+            payload = self.jwt_service.validate_token(token, "access")
 
             # Check if user still exists and is active
             user = self.user_repo.get_user_by_id(payload["sub"])
